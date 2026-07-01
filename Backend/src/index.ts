@@ -1,16 +1,18 @@
 import express, { type Request, type Response } from 'express'
 import pool from './db.js'
 import { contentSchema, signupSchema } from './validation.schema.js'
-import { createJWT, deleteBrain, getContent, getContentId, getTagId, getUsers, hashPassword, insertContent, insertContentTags, insertNewUser, insertTags, userExists } from './servicefunctions.js'
+import { checkExistingHash, createJWT, deleteBrain, deleteLink, getContent, getContentId, getTagId, getuserIdfromLinks, getUsers, hashPassword, insertContent, insertContentTags, insertLink, insertNewUser, insertTags, searchTag, userExists } from './servicefunctions.js'
 import morgan from 'morgan'
 import bcrypt from 'bcrypt'
 import { auth } from './Middleware/auth.js'
-import { success } from 'zod'
+import { createHash } from './Utils/Hash.js'
+import cors from 'cors'
+
 
 const app = express()
 app.use(express.json())
 app.use(morgan('dev'))
-
+app.use(cors())
 
 
 
@@ -28,8 +30,11 @@ app.post('/api/v1/signup', async(req,res)=>{
        let hashedPass = await hashPassword(password)
 
        await insertNewUser(username , hashedPass)
-       console.log('Hogya kaam changed something! and again!')
-       return res.status(200).json({success:true , message:"Signup Successful"})
+       let users = await getUsers(username)
+        let user = users[0]
+        if (!user)  return res.status(400).json({ success: false,  message: "Error Generating JWT" });
+       let token = await createJWT(user.id)
+       return res.status(200).json({success:true ,message:"Signed Up Successfully", token:token})
  
     }
     catch(error){
@@ -59,7 +64,7 @@ app.post('/api/v1/signin' , async(req,res)=>{
 
      let token = await createJWT(user.id)
 
-     return res.status(200).json({success:true , token:token})
+     return res.status(200).json({success:true ,message:"Signed In Successfully", token:token})
 
     }
     catch(error){
@@ -143,12 +148,14 @@ app.get('/api/v1/content' ,auth, async (req:Request,res:Response)=>{
 
 app.delete('/api/v1/content/:id' ,auth, async(req:Request , res:Response)=>{
     let {id} = req.params
+    //@ts-ignore
+    let user_id = req.user.id as number
     if(!id) return res.status(403).json({success:false , message:"id is required"})
 
     if(Array.isArray(id)) return res.status(400).json({success:false , message:" invalid id"})
     
    try{
-    let result =  await deleteBrain(parseInt(id))
+    let result =  await deleteBrain(parseInt(id),user_id)
     //@ts-ignore
      if(result.affectedRows===0){
         return res.status(404).json({success:false , message:"Brain not found"})
@@ -165,17 +172,77 @@ app.delete('/api/v1/content/:id' ,auth, async(req:Request , res:Response)=>{
 
 
 
-// app.post('api/v1/brain/share')
+
+app.post('api/v1/brain/share',auth,async(req:Request,res:Response)=>{
+    //@ts-ignore
+let {id}= req.user
+if(!id) return res.status(400).json({success:false , message:"Unable to fetch Id "})
+
+let {share} = req.body
+try{
+
+let hash= await createHash(10)
+
+let hashExists = await checkExistingHash(id)
+if(hashExists.length>0){
+       return res.status(200).json({success:true  ,hash:hash})
+}
+
+if(share){
+    await insertLink(id,hash)
+    return res.status(200).json({success:true  ,hash:hash})
+}
+else{
+   await  deleteLink(id)
+   return res.status(200).json({success:true , message:"Link Hash Deleted Successfully"})
+}
+}
+catch(error){
+    console.log(error)
+return res.status(500).json({success:false , message:"Internal server error"})
+}
+
+})
 
 
 
 
-// app.get('api/v1/brain/:shareLink')
+app.get('api/v1/brain/:shareLink', async(req:Request,res:Response)=>{
+    let sharelink = req.params.shareLink as string
+if(!sharelink) return res.status(400).json({success:false , message:"No shareLink Found"})
+ try{
+let userId =await getuserIdfromLinks(sharelink)
+let content = await getContent(userId)
+return res.status(200).json({success:true , data:content})
+}
+catch(error){
+    console.log(error)
+    return res.status(500).json({success:false , message:"Internal Server Error"})
+}
+})
+
+
+app.get('/api/v1/tags/search',async(req:Request , res:Response)=>{
+    let {q} = req.query
+    if(!q || typeof(q)!=='string') return res.status(400).json({success:false , message:'request query is required'})
+    
+    let trimmed = q.trim()
+    if(trimmed.length<=0) return res.status(400).json({success:false , message:"please enter a tag to get suggestions"})
+     
+        try{
+          let data = await searchTag(trimmed)
+          if(!data) return res.status(204).json({success:false , message:"no data found "})
+          return res.status(200).json({success:true , data:data})
+        }
+        catch(error){
+         console.log(error)
+         return res.status(500).json({success:false , message:"internal server error"})
+        }
+
+    })
 
 
 
 
 
-
-
-app.listen(2020  , ()=>console.log("Server Qunning on port 2020"))
+app.listen(2020  , ()=>console.log("Server Running on port 2020"))

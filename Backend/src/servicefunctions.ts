@@ -4,6 +4,7 @@ import bcrypt from 'bcrypt'
 import type  {RowDataPacket} from 'mysql2'
 import jwt from 'jsonwebtoken'
 import type { PoolConnection } from 'mysql2/promise'
+import { createHash } from './Utils/Hash.js'
 
 
 
@@ -137,9 +138,45 @@ return result
 
 //delete brain service
 
-export let deleteBrain = async(id:number)=>{
- let query = 'DELETE FROM content WHERE id=?'
- let [rows]= await pool.query<RowDataPacket[]>(query,[id])
+export let deleteBrain = async(id:number,user_id:number)=>{
+ let query = 'DELETE FROM content WHERE id=? AND user_id =?'
+ let [rows]= await pool.query<RowDataPacket[]>(query,[id,user_id])
  console.log(rows)
  return rows
+}
+
+
+
+//create link hash
+
+export let checkExistingHash = async(id:number)=>{
+    let query = 'SELECT * FROM links WHERE userid =?'
+    let [rows] =await pool.query<RowDataPacket[]>(query , [id])
+    return rows
+}
+
+export let insertLink = async (id:number , hash:string)=>{
+
+let query:string = "INSERT INTO links (userid,hash) values(?,?)"
+await pool.query(query,[id,hash])
+}
+
+export let deleteLink = async(id:number)=>{
+    let query:string = 'DELETE FROM links WHERE userid=?'
+    await pool.query(query,[id])
+}
+
+export let getuserIdfromLinks= async(hash:string)=>{
+let query:string = 'SELECT userid FROM links WHERE hash=?'
+let [rows] = await pool.query<RowDataPacket[]>(query,[hash])
+return rows[0]?.userid
+}
+
+
+export let searchTag=async(tag:string)=>{
+let query:string = 'SELECT * FROM tags WHERE NAME LIKE ? LIMIT 10'
+
+let normalisedTag = `%${tag}%`
+const [rows]  = await pool.query<RowDataPacket[]>(query,[normalisedTag])
+return rows
 }
